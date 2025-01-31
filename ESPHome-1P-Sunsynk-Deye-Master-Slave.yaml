@@ -1,73 +1,98 @@
 substitutions:
   settings_skipped_updates: "30"
-  devicename: inverter
-  device_description: "Inverter RS485 Logger"
-  friendly_name: "SunSynk"
+  devicename: solark
+  device_description: "SolArk RS485 Logger"
+  friendly_name: "SolArk"
 
 esphome:
   name: $devicename
   comment: '${device_description}'
-  
+
 esp32:
   board: esp32dev
   framework:
     type: arduino
 
-# Enable webserver
-web_server:
-  port: 80
-  auth:
-    username: !secret web_server_username
-    password: !secret web_server_password
-  version: 2
-  log: false
-  ota: false
-
-# Enable logging
-logger:
-  #baud_rate: 0
-
 # Enable Home Assistant API
 api:
   encryption:
-    key: !secret api_encryption_key
+    key: !secret solark_encryption_key
 
-ota:
-  password: !secret ota_password_sunsynk
-  platform: esphome
-
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-
-  # Enable fallback hotspot (captive portal) in case wifi connection fails
-  ap:
-    ssid: '${devicename}'
-    password: !secret fallback_password
-
-  fast_connect: true
-  power_save_mode: none
-
-captive_portal:
-
-# Enable time component to reset energy at midnight
-# https://esphome.io/components/time.html#home-assistant-time-source
 time:
   - platform: homeassistant
     id: homeassistant_time
-     
+
+ota:
+  # Create a secure password for pushing OTA updates.
+  - platform: esphome
+    password: !secret ota_password
+
+# Enable logging
+logger:
+  logs:
+    # by default, every reading will be printed to the UART, which is very slow
+    # This will disable printing the readings but keep other helpful messages
+    sensor: INFO
+    component: ERROR
+
+wifi:
+  networks:
+  # Wifi credentials are stored securely by new device wizard.
+  - ssid: !secret wifi_ssid
+    password: !secret wifi_password
+  - ssid: !secret wifi_ssid2
+    password: !secret wifi_password2
+  # It is recommended to disable powersave mode on wifi, to make sure the device does not miss UDP requests sent.
+  power_save_mode: none
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "SolArk Fallback Hotspot"
+    password: !secret ap-pass
+
+captive_portal:
+
+preferences:
+  flash_write_interval: "48h"
+
+# Set pins required for LilyGo T-CAN485 board
+output:
+  - platform: gpio
+    id: ENABLE_PIN # Enable the chip
+    pin:
+      number: GPIO19
+      inverted: true
+# ! disabled because we are using this pin for flow control below !
+#  - platform: gpio
+#    id: SE_PIN # Enable autodirection
+#    pin:
+#      number: GPIO17
+#      inverted: true
+  - platform: gpio
+    id: ENABLE_5V_PIN # Enable 5V pin for RS485 chip
+    pin:
+      number: GPIO16
+      inverted: true
+
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB # The correct ordering
+    pin: 4
+    num_leds: 1
+    rmt_channel: 0
+    chipset: ws2812
+    name: "Light"
+
 uart:
   id: mod_bus
-  tx_pin: GPIO17
-  rx_pin: GPIO16
+  tx_pin: GPIO22
+  rx_pin: GPIO21
   baud_rate: 9600
   stop_bits: 1
- 
+
 modbus:
   id: inverter_modbus
-  flow_control_pin: GPIO4
+  flow_control_pin: GPIO17
 
- 
 modbus_controller:
   - id: primary_inverter
     address: 0x01
@@ -82,8 +107,68 @@ modbus_controller:
     update_interval: "15s"
     command_throttle: "50ms"
 
+#Set the interval to sync your inverter time with HA or comment out to disable 
+interval:
+  - interval: 3600s
+    then:
+      - lambda: |-
+          esphome::modbus_controller::ModbusController *controller = id(primary_inverter);
+          time_t now = ::time(nullptr);
+          struct tm *time_info = ::localtime(&now);
+          int seconds = time_info->tm_sec;
+          int minutes = time_info->tm_min;
+          int hour = time_info->tm_hour;
+          int day = time_info->tm_mday;
+          int month = time_info->tm_mon + 1;
+          int year = time_info->tm_year;
+          year = year + 1900;
+          int year1 = year - 2000;
+          
+          uint16_t reg22_value = (year1 << 8) | month;
+          uint16_t reg23_value = (day << 8) | hour;
+          uint16_t reg24_value = (minutes << 8) | seconds;
+          
+          if (year != 1970) {
+            std::vector<uint16_t> rtc_data = {reg22_value, reg23_value, reg24_value};
+            esphome::modbus_controller::ModbusCommandItem set_rtc_command =
+                esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller, 22, rtc_data.size(), rtc_data);
+            controller->queue_command(set_rtc_command);
+            ESP_LOGI("Time Sync", "Seconds: %d, Minutes: %d, Hour: %d, Day: %d, Month: %d, Year: %d", seconds, minutes, hour, day, month, year);
+          }
+
 ############################################### BINARY SENSORS ########################################
-binary_sensor:           
+binary_sensor:
+  - platform: homeassistant            # Manual Time sync. Create an input_boolean sensor in HA
+    entity_id: input_boolean.sync_inverter_time
+    name: "Sync Time"
+    id: sync_time
+    on_press:
+      then:
+        - lambda: |-
+            esphome::modbus_controller::ModbusController *controller = id(primary_inverter);
+            time_t now = ::time(nullptr);
+            struct tm *time_info = ::localtime(&now);
+            int seconds = time_info->tm_sec;
+            int minutes = time_info->tm_min;
+            int hour = time_info->tm_hour;
+            int day = time_info->tm_mday;
+            int month = time_info->tm_mon + 1;
+            int year = time_info->tm_year;
+            year = year + 1900;
+            int year1 = year - 2000;
+            
+            uint16_t reg22_value = (year1 << 8) | month;
+            uint16_t reg23_value = (day << 8) | hour;
+            uint16_t reg24_value = (minutes << 8) | seconds;
+            
+            if (year != 1970) {
+              std::vector<uint16_t> rtc_data = {reg22_value, reg23_value, reg24_value};
+              esphome::modbus_controller::ModbusCommandItem set_rtc_command =
+                  esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller, 22, rtc_data.size(), rtc_data);
+              controller->queue_command(set_rtc_command);
+              ESP_LOGI("Time Sync", "Seconds: %d, Minutes: %d, Hour: %d, Day: %d, Month: %d, Year: %d", seconds, minutes, hour, day, month, year);
+            }
+
   - platform: modbus_controller            # 194 Grid Connected Status
     modbus_controller_id: primary_inverter
     name: "${friendly_name} Grid Connected Status"
@@ -476,7 +561,6 @@ sensor:
       - multiply: 0.1
     value_type: U_WORD 
 
-
   - platform: modbus_controller            # 164 Inverter Current
     modbus_controller_id: primary_inverter
     name: "${friendly_name} Inverter Current"
@@ -556,7 +640,7 @@ sensor:
       - multiply: 0.1
 
   - platform: template                     # Slave Inverter Rated Power
-    name: "${friendly_name} Salve Rated Power"
+    name: "${friendly_name} Slave Rated Power"
     id: slave_inverter_esphome_rated_power
     unit_of_measurement: "W"
     accuracy_decimals: 0
@@ -620,6 +704,17 @@ sensor:
     state_class: measurement
     value_type: S_WORD
 
+  - platform: template                      # Total Sum of Grid-Master and Grid-Slave to get total Grid Power
+    name: "${friendly_name} Total Grid Power"
+    unit_of_measurement: "W"
+    id: total_inverter_esphome_grid_total
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+    lambda: |-
+      return (id(inverter_esphome_grid_power_169).state + id(slave_inverter_esphome_grid_power_169).state);
+    update_interval: 5s
+
   - platform: modbus_controller             # 167 Grid LD Power
     modbus_controller_id: primary_inverter
     name: "${friendly_name} Grid LD Power 167"
@@ -643,6 +738,17 @@ sensor:
     device_class: power
     state_class: measurement
     value_type: S_WORD
+
+  - platform: template                      # Total Sum of Grid-Master and Grid-Slave to get total Grid LD Power
+    name: "${friendly_name} Total Grid LD Power 167"
+    unit_of_measurement: "W"
+    id: total_inverter_esphome_grid_total_ld
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+    lambda: |-
+      return (id(inverter_esphome_grid_power_167).state + id(slave_inverter_esphome_grid_power_167).state);
+    update_interval: 5s
 
   - platform: modbus_controller             # 168 Grid L2 Power
     modbus_controller_id: primary_inverter
@@ -748,7 +854,6 @@ sensor:
     state_class: measurement
     value_type: S_WORD
 
-
 ############################################### LOAD ################################################
 
   - platform: modbus_controller            # 178 Load Power
@@ -774,6 +879,17 @@ sensor:
     device_class: power
     state_class: measurement
     value_type: S_WORD
+
+  - platform: template                   # Total Sum of Load-Master and Load-Slave to get total Load Power
+    name: "${friendly_name} Total Load Power"
+    unit_of_measurement: "W"
+    id: total_inverter_esphome_load_total
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+    lambda: |-
+      return (id(inverter_esphome_load_power).state + id(slave_inverter_esphome_load_power).state);
+    update_interval: 5s
 
   - platform: modbus_controller            # 176 Load L1 Power
     modbus_controller_id: primary_inverter
@@ -1010,49 +1126,87 @@ sensor:
       - multiply: 0.1
     value_type: U_WORD
 
-
 #################################################### SOLAR PV3 #############################################
-#### Uncomment this if you have a third MPPT single phase
     
-  #- platform: modbus_controller            # 188 PV3 Power
-  #  modbus_controller_id: inverter
-  #  name: "${friendly_name} PV3 Power"
-  #  id: inverter_esphome_pv3_power
-  #  register_type: holding
-  #  address: 188
-  #  unit_of_measurement: "W"
-  #  accuracy_decimals: 0
-  #  device_class: power
-  #  state_class: measurement
-  #  value_type: U_WORD
+  - platform: modbus_controller            # 188 PV3 Power
+    modbus_controller_id: primary_inverter
+    name: "${friendly_name} PV3 Power"
+    id: inverter_esphome_pv3_power
+    register_type: holding
+    address: 188
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+    value_type: U_WORD
 
-  #- platform: modbus_controller            # 113 PV3 Voltage
-  #  modbus_controller_id: inverter
-  #  name: "${friendly_name} PV3 Voltage"
-  #  id: inverter_esphome_pv3_voltage
-  #  register_type: holding
-  #  address: 113
-  #  unit_of_measurement: "V"
-  #  accuracy_decimals: 1
-  #  filters:
-  #    - multiply: 0.1
-  #  device_class: voltage
-  #  state_class: measurement
-  #  value_type: U_WORD
+  - platform: modbus_controller            # 188 Slave PV3 Power
+    modbus_controller_id: slave_inverter
+    name: "${friendly_name} Slave PV3 Power"
+    id: slave_inverter_esphome_pv3_power
+    register_type: holding
+    address: 188
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+    value_type: U_WORD
 
-  #- platform: modbus_controller            # 114 PV3 Current
-  #  modbus_controller_id: inverter
-  #  name: "${friendly_name} PV3 Current"
-  #  id: inverter_esphome_pv3_current
-  #  register_type: holding
-  #  address: 114
-  #  unit_of_measurement: "A"
-  #  accuracy_decimals: 1
-  #  device_class: current
-  #  state_class: measurement
-  #  filters:
-  #    - multiply: 0.1
-  #  value_type: U_WORD
+  - platform: modbus_controller            # 113 PV3 Voltage
+    modbus_controller_id: primary_inverter
+    name: "${friendly_name} PV3 Voltage"
+    id: inverter_esphome_pv3_voltage
+    register_type: holding
+    address: 113
+    unit_of_measurement: "V"
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+    device_class: voltage
+    state_class: measurement
+    value_type: U_WORD
+
+  - platform: modbus_controller            # 113 Slave PV3 Voltage
+    modbus_controller_id: slave_inverter
+    name: "${friendly_name} Slave PV3 Voltage"
+    id: slave_inverter_esphome_pv3_voltage
+    register_type: holding
+    address: 113
+    unit_of_measurement: "V"
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+    device_class: voltage
+    state_class: measurement
+    value_type: U_WORD
+
+  - platform: modbus_controller            # 114 PV3 Current
+    modbus_controller_id: primary_inverter
+    name: "${friendly_name} PV3 Current"
+    id: inverter_esphome_pv3_current
+    register_type: holding
+    address: 114
+    unit_of_measurement: "A"
+    accuracy_decimals: 1
+    device_class: current
+    state_class: measurement
+    filters:
+      - multiply: 0.1
+    value_type: U_WORD
+
+  - platform: modbus_controller            # 114 Slave PV2 Current
+    modbus_controller_id: slave_inverter
+    name: "${friendly_name} Slave PV3 Current"
+    id: slave_inverter_esphome_pv3_current
+    register_type: holding
+    address: 114
+    unit_of_measurement: "A"
+    accuracy_decimals: 1
+    device_class: current
+    state_class: measurement
+    filters:
+      - multiply: 0.1
+    value_type: U_WORD
 
 ############################################### SOLAR TOTAL ###########################################
 
@@ -1064,7 +1218,7 @@ sensor:
     device_class: power
     state_class: measurement
     lambda: |-
-      return (id(inverter_esphome_pv1_power).state + id(inverter_esphome_pv2_power).state);
+      return (id(inverter_esphome_pv1_power).state + id(inverter_esphome_pv2_power).state + id(inverter_esphome_pv3_power).state);
     update_interval: 3s
 
   - platform: template                   # Slave Sum of PV1 and PV2 to get total PV Power
@@ -1075,7 +1229,7 @@ sensor:
     device_class: power
     state_class: measurement
     lambda: |-
-      return (id(slave_inverter_esphome_pv1_power).state + id(slave_inverter_esphome_pv2_power).state);
+      return (id(slave_inverter_esphome_pv1_power).state + id(slave_inverter_esphome_pv2_power).state + id(slave_inverter_esphome_pv3_power).state);
     update_interval: 3s
 
   - platform: template                   # Total Sum of PV-Master and PV-Slave to get total PV Power
@@ -1114,7 +1268,6 @@ sensor:
     device_class: power
     state_class: measurement
     value_type: S_WORD
-
 
   - platform: template                   # Essential Power based on register 175 + 167 - 166
     name: "${friendly_name} Essential Power"
@@ -1228,7 +1381,7 @@ sensor:
 
   - platform: template                   # Total Sum of Master and Slave to get total day Battery Charge
     name: "${friendly_name} Total Day Battery Charge"
-    unit_of_measurement: "KWh"
+    unit_of_measurement: "kWh"
     id: total_inverter_esphome_day_battery_charge
     accuracy_decimals: 1
     device_class: energy
@@ -1267,11 +1420,11 @@ sensor:
 
   - platform: template                   # Total Sum of Master and Slave to get total day Battery Discharge
     name: "${friendly_name} Total Day Battery Discharge"
-    unit_of_measurement: "KWh"
+    unit_of_measurement: "kWh"
     id: total_inverter_esphome_day_battery_discharge
     accuracy_decimals: 1
     device_class: energy
-    state_class: measurement
+    state_class: total_increasing
     lambda: |-
       return (id(inverter_esphome_day_battery_discharge).state + id(slave_inverter_esphome_day_battery_discharge).state);
     update_interval: 5s
@@ -1361,6 +1514,17 @@ sensor:
     filters:
       - multiply: 0.1
 
+  - platform: template                   # Total Sum of Master and Slave to get total Day Grid Import
+    name: "${friendly_name} Total Day Grid Import"
+    unit_of_measurement: "kWh"
+    id: total_inverter_esphome_day_grid_import
+    accuracy_decimals: 1
+    device_class: energy
+    state_class: total_increasing
+    lambda: |-
+      return (id(inverter_esphome_day_grid_import).state + id(slave_inverter_esphome_day_grid_import).state);
+    update_interval: 5s
+
   - platform: modbus_controller            # 077 Day Grid Export
     modbus_controller_id: primary_inverter
     name: "${friendly_name} Day Grid Export"
@@ -1389,6 +1553,16 @@ sensor:
     filters:
       - multiply: 0.1
 
+  - platform: template                   # Total Sum of Master and Slave to get total Day Grid Export
+    name: "${friendly_name} Total Day Grid Export"
+    unit_of_measurement: "kWh"
+    id: total_inverter_esphome_day_grid_export
+    accuracy_decimals: 1
+    device_class: energy
+    state_class: total_increasing
+    lambda: |-
+      return (id(inverter_esphome_day_grid_export).state + id(slave_inverter_esphome_day_grid_export).state);
+    update_interval: 5s
 
   - platform: modbus_controller            # 078 Total Grid Import
     modbus_controller_id: primary_inverter
@@ -1446,7 +1620,6 @@ sensor:
     filters:
       - multiply: 0.1
 
-
   - platform: modbus_controller            # 084 Day Load Energy
     modbus_controller_id: primary_inverter
     name: "${friendly_name} Day Load Energy"
@@ -1475,13 +1648,13 @@ sensor:
       - multiply: 0.1
     value_type: U_WORD
 
-  - platform: template                   # Total Sum of Master and Slave to get total day Day Load Energy
+  - platform: template                   # Total Sum of Master and Slave to get total Day Load Energy
     name: "${friendly_name} Total Day Load Energy"
-    unit_of_measurement: "KWh"
+    unit_of_measurement: "kWh"
     id: total_inverter_esphome_day_load_energy
     accuracy_decimals: 2
     device_class: energy
-    state_class: measurement
+    state_class: total_increasing
     lambda: |-
       return (id(inverter_esphome_day_load_energy).state + id(slave_inverter_esphome_day_load_energy).state);
     update_interval: 5s
@@ -1571,13 +1744,13 @@ sensor:
       - multiply: 0.1
     value_type: U_WORD
 
-  - platform: template                   # Total Sum of Master and Slave to get total day Day PV Energy
+  - platform: template                   # Total Sum of Master and Slave to get total Day PV Energy
     name: "${friendly_name} Total Day PV Energy"
-    unit_of_measurement: "KWh"
+    unit_of_measurement: "kWh"
     id: total_inverter_esphome_day_pv_energy
     accuracy_decimals: 1
     device_class: energy
-    state_class: measurement
+    state_class: total_increasing
     lambda: |-
       return (id(inverter_esphome_day_pv_energy).state + id(slave_inverter_esphome_day_pv_energy).state);
     update_interval: 5s
@@ -1671,7 +1844,7 @@ sensor:
     id: inverter_esphome_system_mode_time2
     register_type: holding
     skip_updates: ${settings_skipped_updates}
-    address: 251   
+    address: 251
     icon: "mdi:clock"
 
   - platform: modbus_controller          # 251 Slave Prog2 Time
@@ -1680,7 +1853,7 @@ sensor:
     id: slave_inverter_esphome_system_mode_time2
     register_type: holding
     skip_updates: ${settings_skipped_updates}
-    address: 251   
+    address: 251
     icon: "mdi:clock"
 
   - platform: modbus_controller          # 252 Prog3 Time
@@ -1689,7 +1862,7 @@ sensor:
     id: inverter_esphome_system_mode_time3
     register_type: holding
     skip_updates: ${settings_skipped_updates}
-    address: 252   
+    address: 252
     icon: "mdi:clock"
 
   - platform: modbus_controller          # 252 Slave Prog3 Time
@@ -1698,7 +1871,7 @@ sensor:
     id: slave_inverter_esphome_system_mode_time3
     register_type: holding
     skip_updates: ${settings_skipped_updates}
-    address: 252   
+    address: 252
     icon: "mdi:clock"
 
   - platform: modbus_controller          # 253 Prog4 Time
@@ -1707,7 +1880,7 @@ sensor:
     id: inverter_esphome_system_mode_time4
     register_type: holding
     skip_updates: ${settings_skipped_updates}
-    address: 253   
+    address: 253
     icon: "mdi:clock"
 
   - platform: modbus_controller          # 253 Slave Prog4 Time
@@ -1716,7 +1889,7 @@ sensor:
     id: slave_inverter_esphome_system_mode_time4
     register_type: holding
     skip_updates: ${settings_skipped_updates}
-    address: 253   
+    address: 253
     icon: "mdi:clock"
 
   - platform: modbus_controller          # 254 Prog5 Time
@@ -1725,7 +1898,7 @@ sensor:
     id: inverter_esphome_system_mode_time5
     register_type: holding
     skip_updates: ${settings_skipped_updates}
-    address: 254   
+    address: 254
     icon: "mdi:clock"
 
   - platform: modbus_controller          # 254 Slave Prog5 Time
@@ -1734,7 +1907,7 @@ sensor:
     id: slave_inverter_esphome_system_mode_time5
     register_type: holding
     skip_updates: ${settings_skipped_updates}
-    address: 254   
+    address: 254
     icon: "mdi:clock"
 
   - platform: modbus_controller          # 255 Prog6 Time
@@ -1743,7 +1916,7 @@ sensor:
     id: inverter_esphome_system_mode_time6
     register_type: holding
     skip_updates: ${settings_skipped_updates}
-    address: 255   
+    address: 255
     icon: "mdi:clock"
 
   - platform: modbus_controller          # 255 Slave Prog6 Time
@@ -1752,7 +1925,7 @@ sensor:
     id: slave_inverter_esphome_system_mode_time6
     register_type: holding
     skip_updates: ${settings_skipped_updates}
-    address: 255   
+    address: 255
     icon: "mdi:clock"
 
   - platform: modbus_controller        # 280 Grid Peak Shaving raw register value
@@ -1768,8 +1941,44 @@ sensor:
     register_type: holding
     address: 280
     value_type: U_WORD
-   
+
 ################################################ SAVE RAW REGISTERS ########################################
+
+  - platform: modbus_controller            # 16 raw register value
+    modbus_controller_id: primary_inverter
+    id: reg_16_raw
+    register_type: holding
+    address: 16
+    value_type: U_WORD
+    internal: true
+    skip_updates: ${settings_skipped_updates}
+
+  - platform: modbus_controller            # 16 Slave raw register value
+    modbus_controller_id: slave_inverter
+    id: slave_reg_16_raw
+    register_type: holding
+    address: 16
+    value_type: U_WORD
+    internal: true
+    skip_updates: ${settings_skipped_updates}
+
+  - platform: modbus_controller            # 17 raw register value
+    modbus_controller_id: primary_inverter
+    id: reg_17_raw
+    register_type: holding
+    address: 17
+    value_type: U_WORD
+    internal: true
+    skip_updates: ${settings_skipped_updates}
+
+  - platform: modbus_controller            # 17 Slave raw register value
+    modbus_controller_id: primary_inverter
+    id: slave_reg_17_raw
+    register_type: holding
+    address: 17
+    value_type: U_WORD
+    internal: true
+    skip_updates: ${settings_skipped_updates}
 
   - platform: modbus_controller            # 274 raw register value
     modbus_controller_id: primary_inverter
@@ -1867,42 +2076,6 @@ sensor:
     value_type: U_WORD
     internal: true
 
-  - platform: modbus_controller            # 16 raw register value
-    modbus_controller_id: primary_inverter
-    id: reg_16_raw
-    register_type: holding
-    address: 16
-    value_type: U_WORD
-    internal: true
-    skip_updates: ${settings_skipped_updates}
-
-  - platform: modbus_controller            # 16 Slave raw register value
-    modbus_controller_id: slave_inverter
-    id: slave_reg_16_raw
-    register_type: holding
-    address: 16
-    value_type: U_WORD
-    internal: true
-    skip_updates: ${settings_skipped_updates}
-
-  - platform: modbus_controller            # 17 raw register value
-    modbus_controller_id: primary_inverter
-    id: reg_17_raw
-    register_type: holding
-    address: 17
-    value_type: U_WORD
-    internal: true
-    skip_updates: ${settings_skipped_updates}
-
-  - platform: modbus_controller            # 17 Slave raw register value
-    modbus_controller_id: primary_inverter
-    id: slave_reg_17_raw
-    register_type: holding
-    address: 17
-    value_type: U_WORD
-    internal: true
-    skip_updates: ${settings_skipped_updates}
-
 ################################################ WRITE SETTINGS ############################################
 
 switch:
@@ -1976,7 +2149,7 @@ switch:
     bitmask: 1
     icon: "mdi:toggle-switch"
 
-  - platform: modbus_controller          # 247 Salve Toggle Solar Sell
+  - platform: modbus_controller          # 247 Slave Toggle Solar Sell
     use_write_multiple: true
     modbus_controller_id: slave_inverter
     name: "${friendly_name} Slave Toggle Solar sell"
@@ -2125,7 +2298,6 @@ switch:
     address: 278
     bitmask: 1
     icon: "mdi:toggle-switch"
-
 
   - platform: modbus_controller          # 279 Prog6 Charge
     modbus_controller_id: primary_inverter
@@ -2440,7 +2612,7 @@ number:
 
   - platform: modbus_controller            # 262 Prog1 Voltage
     use_write_multiple: true
-    modbus_controller_id: inverter
+    modbus_controller_id: primary_inverter
     id: inverter_esphome_set_voltage_time1
     name: "${friendly_name} Prog1 Voltage"
     unit_of_measurement: "V"
@@ -2470,7 +2642,7 @@ number:
 
   - platform: modbus_controller            # 263 Prog2 Voltage
     use_write_multiple: true
-    modbus_controller_id: inverter
+    modbus_controller_id: primary_inverter
     id: inverter_esphome_set_voltage_time2
     name: "${friendly_name} Prog2 Voltage"
     unit_of_measurement: "V"
@@ -2500,7 +2672,7 @@ number:
 
   - platform: modbus_controller            # 264 Prog3 Voltage
     use_write_multiple: true
-    modbus_controller_id: inverter
+    modbus_controller_id: primary_inverter
     id: inverter_esphome_set_voltage_time3
     name: "${friendly_name} Prog3 Voltage"
     unit_of_measurement: "V"
@@ -2530,7 +2702,7 @@ number:
 
   - platform: modbus_controller            # 265 Prog4 Voltage
     use_write_multiple: true
-    modbus_controller_id: inverter
+    modbus_controller_id: primary_inverter
     id: inverter_esphome_set_voltage_time4
     name: "${friendly_name} Prog4 Voltage"
     unit_of_measurement: "V"
@@ -2560,7 +2732,7 @@ number:
 
   - platform: modbus_controller            # 266 Prog5 Voltage
     use_write_multiple: true
-    modbus_controller_id: inverter
+    modbus_controller_id: primary_inverter
     id: inverter_esphome_set_voltage_time5
     name: "${friendly_name} Prog5 Voltage"
     unit_of_measurement: "V"
@@ -2590,7 +2762,7 @@ number:
 
   - platform: modbus_controller            # 267 Prog6 Voltage
     use_write_multiple: true
-    modbus_controller_id: inverter
+    modbus_controller_id: primary_inverter
     id: inverter_esphome_set_voltage_time6
     name: "${friendly_name} Prog6 Voltage"
     unit_of_measurement: "V"
@@ -3228,62 +3400,6 @@ select:
       "Output": 1
       "Input": 2    
 
-  - platform: modbus_controller                  #280 Select Grid Peak Shaving
-    use_write_multiple: true
-    modbus_controller_id: primary_inverter
-    name: "${friendly_name} Grid Peak Shaving"
-    id: inverter_esphome_select_grid_peak_shaving
-    address: 280
-    value_type: U_WORD
-    optionsmap:
-      "Disabled": 0
-      "Enabled": 256
-    lambda: |-
-      // we are only interested in the 8th bit binary 0001 0000 0000 need to map the options 0, 256 in select 
-      //ESP_LOGE("main","Modbus Number incoming value = %d",x);
-      //ESP_LOGE("main","Modbus eval value = %d",(x & 0x0100));
-      if ((x & 0x0100) == 0)
-        return  std::string("Disabled");
-      if ((x & 0x0100) == 256)
-        return  std::string("Enabled");
-      return {};
-    write_lambda: |-
-      //ESP_LOGE("main","Modbus write gets = %d",value);
-      uint16_t unmodified =  id(grid_peak_shaving_raw).state;
-      //ESP_LOGE("main","Modbus write unmodified = %d", unmodified);
-      // optionsmap should only return 2 values... 0 , 256 so bitmask with complement 0x0100 to ensure we keep the original values in register. then appply or with the value that was chosen
-      uint16_t modified = ((unmodified & ~0x0100) | value);
-      //ESP_LOGE("main","Modbus write to write = %d", modified);
-      return modified;
-
-  - platform: modbus_controller                  #280 Slave Select Grid Peak Shaving
-    use_write_multiple: true
-    modbus_controller_id: slave_inverter
-    name: "${friendly_name} Slave Grid Peak Shaving"
-    id: slave_inverter_esphome_select_grid_peak_shaving
-    address: 280
-    value_type: U_WORD
-    optionsmap:
-      "Disabled": 0
-      "Enabled": 256
-    lambda: |-
-      // we are only interested in the 8th bit binary 0001 0000 0000 need to map the options 0, 256 in select 
-      //ESP_LOGE("main","Modbus Number incoming value = %d",x);
-      //ESP_LOGE("main","Modbus eval value = %d",(x & 0x0100));
-      if ((x & 0x0100) == 0)
-        return  std::string("Disabled");
-      if ((x & 0x0100) == 256)
-        return  std::string("Enabled");
-      return {};
-    write_lambda: |-
-      //ESP_LOGE("main","Modbus write gets = %d",value);
-      uint16_t unmodified =  id(grid_peak_shaving_raw).state;
-      //ESP_LOGE("main","Modbus write unmodified = %d", unmodified);
-      // optionsmap should only return 2 values... 0 , 256 so bitmask with complement 0x0100 to ensure we keep the original values in register. then appply or with the value that was chosen
-      uint16_t modified = ((unmodified & ~0x0100) | value);
-      //ESP_LOGE("main","Modbus write to write = %d", modified);
-      return modified;
-
   - platform: modbus_controller            #274 Select Prog1 Charge Option
     use_write_multiple: true
     modbus_controller_id: primary_inverter
@@ -3422,7 +3538,7 @@ select:
   - platform: modbus_controller            #276 Slave Select Prog3 Charge Option
     use_write_multiple: true
     modbus_controller_id: slave_inverter
-    name: "${friendly_name} Salve Prog3 Charge Option"
+    name: "${friendly_name} Slave Prog3 Charge Option"
     id: slave_inverter_esphome_select_system_mode_charge_option_time_3
     address: 276
     value_type: U_WORD
@@ -3606,6 +3722,62 @@ select:
     write_lambda: |-
       uint16_t unmodified =  id(reg_279_raw).state;
       uint16_t modified = ((unmodified & ~0x0003) | value);
+      return modified;
+
+  - platform: modbus_controller                  #280 Select Grid Peak Shaving
+    use_write_multiple: true
+    modbus_controller_id: primary_inverter
+    name: "${friendly_name} Grid Peak Shaving"
+    id: inverter_esphome_select_grid_peak_shaving
+    address: 280
+    value_type: U_WORD
+    optionsmap:
+      "Disabled": 0
+      "Enabled": 256
+    lambda: |-
+      // we are only interested in the 8th bit binary 0001 0000 0000 need to map the options 0, 256 in select 
+      //ESP_LOGE("main","Modbus Number incoming value = %d",x);
+      //ESP_LOGE("main","Modbus eval value = %d",(x & 0x0100));
+      if ((x & 0x0100) == 0)
+        return  std::string("Disabled");
+      if ((x & 0x0100) == 256)
+        return  std::string("Enabled");
+      return {};
+    write_lambda: |-
+      //ESP_LOGE("main","Modbus write gets = %d",value);
+      uint16_t unmodified =  id(grid_peak_shaving_raw).state;
+      //ESP_LOGE("main","Modbus write unmodified = %d", unmodified);
+      // optionsmap should only return 2 values... 0 , 256 so bitmask with complement 0x0100 to ensure we keep the original values in register. then appply or with the value that was chosen
+      uint16_t modified = ((unmodified & ~0x0100) | value);
+      //ESP_LOGE("main","Modbus write to write = %d", modified);
+      return modified;
+
+  - platform: modbus_controller                  #280 Slave Select Grid Peak Shaving
+    use_write_multiple: true
+    modbus_controller_id: slave_inverter
+    name: "${friendly_name} Slave Grid Peak Shaving"
+    id: slave_inverter_esphome_select_grid_peak_shaving
+    address: 280
+    value_type: U_WORD
+    optionsmap:
+      "Disabled": 0
+      "Enabled": 256
+    lambda: |-
+      // we are only interested in the 8th bit binary 0001 0000 0000 need to map the options 0, 256 in select 
+      //ESP_LOGE("main","Modbus Number incoming value = %d",x);
+      //ESP_LOGE("main","Modbus eval value = %d",(x & 0x0100));
+      if ((x & 0x0100) == 0)
+        return  std::string("Disabled");
+      if ((x & 0x0100) == 256)
+        return  std::string("Enabled");
+      return {};
+    write_lambda: |-
+      //ESP_LOGE("main","Modbus write gets = %d",value);
+      uint16_t unmodified =  id(grid_peak_shaving_raw).state;
+      //ESP_LOGE("main","Modbus write unmodified = %d", unmodified);
+      // optionsmap should only return 2 values... 0 , 256 so bitmask with complement 0x0100 to ensure we keep the original values in register. then appply or with the value that was chosen
+      uint16_t modified = ((unmodified & ~0x0100) | value);
+      //ESP_LOGE("main","Modbus write to write = %d", modified);
       return modified;
 
 #Disabled as these are for Turbo Energy Inverters
