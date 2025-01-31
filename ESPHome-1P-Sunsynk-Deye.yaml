@@ -1,71 +1,97 @@
 substitutions:
   settings_skipped_updates: "30"
-  devicename: "inverter"
-  device_description: "Inverter RS485 Logger"
-  friendly_name: "SunSynk"
+  devicename: solark
+  device_description: "SolArk RS485 Logger"
+  friendly_name: "SolArk"
 
 esphome:
   name: $devicename
   comment: '${device_description}'
-  
+
 esp32:
-  board: nodemcu-32s
+  board: exp32dev
   framework:
     type: arduino
-
-# Enable webserver
-web_server:
-  port: 80
-  auth:
-    username: !secret web_server_username
-    password: !secret web_server_password
-  version: 2
-  log: false
-  ota: false
-
-# Enable logging
-logger:
-  baud_rate: 0
 
 # Enable Home Assistant API
 api:
   encryption:
-    key: !secret api_encryption_key
+    key: !secret solark_encryption_key
 
-ota:
-  password: !secret ota_password_sunsynk
-  platform: esphome
-
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-
-  # Enable fallback hotspot (captive portal) in case wifi connection fails
-  ap:
-    ssid: '${devicename}'
-    password: !secret fallback_password
-
-  fast_connect: true
-  power_save_mode: none
-
-captive_portal:
-
-# Enable time component to reset energy at midnight
-# https://esphome.io/components/time.html#home-assistant-time-source
 time:
   - platform: homeassistant
     id: homeassistant_time
-     
+
+ota:
+  # Create a secure password for pushing OTA updates.
+  - platform: esphome
+    password: !secret ota_password
+
+# Enable logging
+logger:
+  logs:
+    # by default, every reading will be printed to the UART, which is very slow
+    # This will disable printing the readings but keep other helpful messages
+    sensor: INFO
+    component: ERROR
+
+wifi:
+  networks:
+  # Wifi credentials are stored securely by new device wizard.
+  - ssid: !secret wifi_ssid
+    password: !secret wifi_password
+  - ssid: !secret wifi_ssid2
+    password: !secret wifi_password2
+  # It is recommended to disable powersave mode on wifi, to make sure the device does not miss UDP requests sent.
+  power_save_mode: none
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "SolArk Fallback Hotspot"
+    password: !secret ap-pass
+
+captive_portal:
+
+preferences:
+  flash_write_interval: "48h"
+    
+# Set pins required for LilyGo T-CAN485 board
+output:
+  - platform: gpio
+    id: ENABLE_PIN # Enable the chip
+    pin:
+      number: GPIO19
+      inverted: true
+# ! disabled because we are using this pin for flow control below !
+#  - platform: gpio
+#    id: SE_PIN # Enable autodirection
+#    pin:
+#      number: GPIO17
+#      inverted: true
+  - platform: gpio
+    id: ENABLE_5V_PIN # Enable 5V pin for RS485 chip
+    pin:
+      number: GPIO16
+      inverted: true
+
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB # The correct ordering
+    pin: 4
+    num_leds: 1
+    rmt_channel: 0
+    chipset: ws2812
+    name: "Light"
+
 uart:
   id: mod_bus
-  tx_pin: GPIO1
-  rx_pin: GPIO3
+  tx_pin: GPIO22
+  rx_pin: GPIO21
   baud_rate: 9600
   stop_bits: 1
- 
+
 modbus:
   id: inverter_modbus
-  flow_control_pin: GPIO16
+  flow_control_pin: GPIO17
  
 modbus_controller:
   - id: inverter
@@ -107,7 +133,7 @@ interval:
 ############################################### BINARY SENSORS ########################################
 binary_sensor:
   - platform: homeassistant            # Manual Time sync. Create an input_boolean sensor in HA
-    entity_id: input_boolean.sync_inverter_time
+    entity_id: input_boolean.sync_solark_time
     name: "Sync Time"
     id: sync_time
     on_press:
@@ -140,14 +166,14 @@ binary_sensor:
   - platform: modbus_controller            # 194 Grid Connected Status
     modbus_controller_id: inverter
     name: "${friendly_name} Grid Connected Status"
-    id: inverter_esphome_grid_connected_status
+    id: solark_esphome_grid_connected_status
     register_type: holding
     address: 194
 
   - platform: modbus_controller           # 280 Gen Peak Shaving Status
     modbus_controller_id: inverter
     name: "${friendly_name} Gen Peak Shaving Status"
-    id: inverter_esphome_gen_peak_shaving_status
+    id: solark_esphome_gen_peak_shaving_status
     register_type: holding
     address: 280
     bitmask: 0x10
@@ -155,7 +181,7 @@ binary_sensor:
   - platform: modbus_controller           # 280 Grid Peak Shaving Status
     modbus_controller_id: inverter
     name: "${friendly_name} Grid Peak Shaving Status"
-    id: inverter_esphome_grid_peak_shaving_status
+    id: solark_esphome_grid_peak_shaving_status
     register_type: holding
     address: 280
     bitmask: 0x100
@@ -168,7 +194,7 @@ sensor:
   - platform: modbus_controller            # 182 Battery Temperature
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Temperature"
-    id: inverter_esphome_battery_temperature
+    id: solark_esphome_battery_temperature
     register_type: holding
     address: 182
     unit_of_measurement: "°C"
@@ -183,7 +209,7 @@ sensor:
   - platform: modbus_controller            # 183 Battery Voltage
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Voltage"
-    id: inverter_esphome_battery_voltage
+    id: solark_esphome_battery_voltage
     register_type: holding
     address: 183
     unit_of_measurement: "V"
@@ -197,7 +223,7 @@ sensor:
   - platform: modbus_controller            # 184 Battery SOC
     modbus_controller_id: inverter
     name: "${friendly_name} Battery SOC"
-    id: inverter_esphome_battery_soc
+    id: solark_esphome_battery_soc
     register_type: holding
     address: 184
     unit_of_measurement: "%"
@@ -208,7 +234,7 @@ sensor:
   - platform: modbus_controller            # 190 Battery Power
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Power"
-    id: inverter_esphome_battery_power
+    id: solark_esphome_battery_power
     register_type: holding
     address: 190
     unit_of_measurement: "W"
@@ -219,7 +245,7 @@ sensor:
   - platform: modbus_controller            # Battery Power Charge only needed if you want to calculate Daily Energy Totals using ESPHome
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Power Charge"
-    id: inverter_esphome_battery_power_charge
+    id: solark_esphome_battery_power_charge
     register_type: holding
     address: 190
     unit_of_measurement: "W"
@@ -233,7 +259,7 @@ sensor:
   - platform: modbus_controller            # Battery Power DisCharge only needed if you want to calculate Daily Energy Totals using ESPHome
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Power Discharge"
-    id: inverter_esphome_battery_power_discharge
+    id: solark_esphome_battery_power_discharge
     register_type: holding
     address: 190
     unit_of_measurement: "W"
@@ -249,7 +275,7 @@ sensor:
   - platform: modbus_controller            # 191 Battery Current
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Current"
-    id: inverter_esphome_battery_current
+    id: solark_esphome_battery_current
     register_type: holding
     address: 191
     unit_of_measurement: "A"
@@ -263,7 +289,7 @@ sensor:
   - platform: modbus_controller            # 314 Battery Charge Limit Current
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Charge Limit Current"
-    id: inverter_esphome_battery_charge_limit_current
+    id: solark_esphome_battery_charge_limit_current
     register_type: holding
     address: 314
     unit_of_measurement: "A"
@@ -275,7 +301,7 @@ sensor:
   - platform: modbus_controller            # 315 Battery Discharge Limit Current
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Discharge Limit Current"
-    id: inverter_esphome_battery_discharge_limit_current
+    id: solark_esphome_battery_discharge_limit_current
     register_type: holding
     address: 315
     unit_of_measurement: "A"
@@ -289,7 +315,7 @@ sensor:
   - platform: modbus_controller            # 217 Battery Capacity Shutdown
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Capacity Shutdown"
-    id: inverter_esphome_battery_capacity_shutdown
+    id: solark_esphome_battery_capacity_shutdown
     register_type: holding
     address: 217
     unit_of_measurement: "%"
@@ -300,7 +326,7 @@ sensor:
   - platform: modbus_controller            # 218 Battery Restart Capacity
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Restart Capacity"
-    id: inverter_esphome_battery_restart_capacity
+    id: solark_esphome_battery_restart_capacity
     register_type: holding
     address: 218
     unit_of_measurement: "%"
@@ -311,7 +337,7 @@ sensor:
   - platform: modbus_controller            # 219 Battery Low Capacity
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Low Capacity"
-    id: inverter_esphome_battery_low_capacity
+    id: solark_esphome_battery_low_capacity
     register_type: holding
     address: 219
     unit_of_measurement: "%"
@@ -324,7 +350,7 @@ sensor:
   - platform: modbus_controller            # 220 Battery Shutdown voltage
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Shutdown voltage"
-    id: inverter_esphome_battery_shutdown_voltage
+    id: solark_esphome_battery_shutdown_voltage
     register_type: holding
     address: 220
     unit_of_measurement: "V"
@@ -337,7 +363,7 @@ sensor:
   - platform: modbus_controller            # 221 Battery Restart voltage
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Restart voltage"
-    id: inverter_esphome_battery_restart_voltage
+    id: solark_esphome_battery_restart_voltage
     register_type: holding
     address: 221
     unit_of_measurement: "V"
@@ -350,7 +376,7 @@ sensor:
   - platform: modbus_controller            # 222 Battery Low voltage
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Low voltage"
-    id: inverter_esphome_battery_low_voltage
+    id: solark_esphome_battery_low_voltage
     register_type: holding
     address: 222
     unit_of_measurement: "V"
@@ -363,7 +389,7 @@ sensor:
   - platform: modbus_controller            # 201 Battery Equalization voltage
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Equalization voltage"
-    id: inverter_esphome_battery_equalisation_voltage
+    id: solark_esphome_battery_equalisation_voltage
     register_type: holding
     address: 201
     unit_of_measurement: "V"
@@ -376,7 +402,7 @@ sensor:
   - platform: modbus_controller            # 202 Battery Absorption voltage
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Absorption voltage"
-    id: inverter_esphome_battery_absorbtion_voltage
+    id: solark_esphome_battery_absorbtion_voltage
     register_type: holding
     address: 202
     unit_of_measurement: "V"
@@ -389,7 +415,7 @@ sensor:
   - platform: modbus_controller            # 203 Battery Float voltage
     modbus_controller_id: inverter
     name: "${friendly_name} Battery Float voltage"
-    id: inverter_esphome_battery_float_voltage
+    id: solark_esphome_battery_float_voltage
     register_type: holding
     address: 203
     unit_of_measurement: "V"
@@ -404,7 +430,7 @@ sensor:
   - platform: modbus_controller            # 175 Inverter Power
     modbus_controller_id: inverter
     name: "${friendly_name} Inverter Power"
-    id: inverter_esphome_inverter_power
+    id: solark_esphome_solark_power
     register_type: holding
     address: 175
     unit_of_measurement: "W"
@@ -415,7 +441,7 @@ sensor:
   - platform: modbus_controller            # 154 Inverter Voltage
     modbus_controller_id: inverter
     name: "${friendly_name} Inverter Voltage"
-    id: inverter_esphome_inverter_voltage
+    id: solark_esphome_solark_voltage
     register_type: holding
     address: 154
     unit_of_measurement: "V"
@@ -429,7 +455,7 @@ sensor:
   - platform: modbus_controller            # 164 Inverter Current
     modbus_controller_id: inverter
     name: "${friendly_name} Inverter Current"
-    id: inverter_esphome_inverter_current
+    id: solark_esphome_solark_current
     register_type: holding
     address: 164
     unit_of_measurement: "A"
@@ -443,7 +469,7 @@ sensor:
   - platform: modbus_controller            # 193 Inverter Frequency
     modbus_controller_id: inverter
     name: "${friendly_name} Inverter Frequency"
-    id: inverter_esphome_inverter_frequency
+    id: solark_esphome_solark_frequency
     register_type: holding
     address: 193
     unit_of_measurement: "Hz"
@@ -455,7 +481,7 @@ sensor:
 
   - platform: template                     # Inverter Rated Power
     name: "${friendly_name} Rated Power"
-    id: inverter_esphome_rated_power
+    id: solark_esphome_rated_power
     unit_of_measurement: "W"
     accuracy_decimals: 0
     device_class: power
@@ -472,7 +498,7 @@ sensor:
   - platform: modbus_controller            # 079 Grid Frequency
     modbus_controller_id: inverter
     name: "${friendly_name} Grid Frequency"
-    id: inverter_esphome_grid_frequency
+    id: solark_esphome_grid_frequency
     register_type: holding
     address: 79
     unit_of_measurement: "Hz"
@@ -485,7 +511,7 @@ sensor:
   - platform: modbus_controller            # 169 Grid Power
     modbus_controller_id: inverter
     name: "${friendly_name} Grid Power"
-    id: inverter_esphome_grid_power_169
+    id: solark_esphome_grid_power_169
     register_type: holding
     address: 169
     unit_of_measurement: "W"
@@ -497,7 +523,7 @@ sensor:
   - platform: modbus_controller            # 167 Grid LD Power
     modbus_controller_id: inverter
     name: "${friendly_name} Grid LD Power 167"
-    id: inverter_esphome_grid_power_167
+    id: solark_esphome_grid_power_167
     register_type: holding
     address: 167
     unit_of_measurement: "W"
@@ -509,7 +535,7 @@ sensor:
   - platform: modbus_controller            # 168 Grid L2 Power
     modbus_controller_id: inverter
     name: "${friendly_name} Grid L2 Power 168"
-    id: inverter_esphome_grid_power_168
+    id: solark_esphome_grid_power_168
     register_type: holding
     address: 168
     unit_of_measurement: "W"
@@ -521,7 +547,7 @@ sensor:
   - platform: modbus_controller            # 150 Grid Voltage
     modbus_controller_id: inverter
     name: "${friendly_name} Grid Voltage"
-    id: inverter_esphome_grid_voltage
+    id: solark_esphome_grid_voltage
     register_type: holding
     address: 150
     unit_of_measurement: "V"
@@ -535,7 +561,7 @@ sensor:
   - platform: modbus_controller            # 160 Grid Current
     modbus_controller_id: inverter
     name: "${friendly_name} Grid Current"
-    id: inverter_esphome_grid_current
+    id: solark_esphome_grid_current
     register_type: holding
     address: 160
     unit_of_measurement: "A"
@@ -549,7 +575,7 @@ sensor:
   - platform: modbus_controller            # 172 Grid CT Power
     modbus_controller_id: inverter
     name: "${friendly_name} Grid CT Power"
-    id: inverter_esphome_grid_ct_power
+    id: solark_esphome_grid_ct_power
     register_type: holding
     address: 172
     unit_of_measurement: "W"
@@ -561,7 +587,7 @@ sensor:
   - platform: modbus_controller            # Grid Power Import only needed if you want to calculate Daily Energy Totals using ESPHome
     modbus_controller_id: inverter
     name: "${friendly_name} Grid Power Import"
-    id: inverter_esphome_grid_ct_power_import
+    id: solark_esphome_grid_ct_power_import
     register_type: holding
     address: 172
     unit_of_measurement: "W"
@@ -579,7 +605,7 @@ sensor:
     register_type: holding
     address: 172
     unit_of_measurement: "W"
-    id: inverter_esphome_grid_ct_power_export
+    id: solark_esphome_grid_ct_power_export
     accuracy_decimals: 0
     internal: true
     device_class: power
@@ -593,7 +619,7 @@ sensor:
   - platform: modbus_controller            # 178 Load Power
     modbus_controller_id: inverter
     name: "${friendly_name} Load Power"
-    id: inverter_esphome_load_power
+    id: solark_esphome_load_power
     register_type: holding
     address: 178
     unit_of_measurement: "W"
@@ -605,7 +631,7 @@ sensor:
   - platform: modbus_controller            # 176 Load L1 Power
     modbus_controller_id: inverter
     name: "${friendly_name} Load L1 Power"
-    id: inverter_esphome_load_l1_power
+    id: solark_esphome_load_l1_power
     register_type: holding
     address: 176
     unit_of_measurement: "W"
@@ -617,7 +643,7 @@ sensor:
   - platform: modbus_controller            # 177 Load L2 Power
     modbus_controller_id: inverter
     name: "${friendly_name} Load L2 Power"
-    id: inverter_esphome_load_l2_power
+    id: solark_esphome_load_l2_power
     register_type: holding
     address: 177
     unit_of_measurement: "W"
@@ -629,7 +655,7 @@ sensor:
   - platform: modbus_controller            # 192 Load Frequency
     modbus_controller_id: inverter
     name: "${friendly_name} Load Frequency"
-    id: inverter_esphome_load_frequency
+    id: solark_esphome_load_frequency
     register_type: holding
     address: 192
     unit_of_measurement: "Hz"
@@ -644,7 +670,7 @@ sensor:
   - platform: modbus_controller            # 186 PV1 Power
     modbus_controller_id: inverter
     name: "${friendly_name} PV1 Power"
-    id: inverter_esphome_pv1_power
+    id: solark_esphome_pv1_power
     register_type: holding
     address: 186
     unit_of_measurement: "W"
@@ -656,7 +682,7 @@ sensor:
   - platform: modbus_controller            # 109 PV1 Voltage
     modbus_controller_id: inverter
     name: "${friendly_name} PV1 Voltage"
-    id: inverter_esphome_pv1_voltage
+    id: solark_esphome_pv1_voltage
     register_type: holding
     address: 109
     unit_of_measurement: "V"
@@ -670,7 +696,7 @@ sensor:
   - platform: modbus_controller            # 110 PV1 Current
     modbus_controller_id: inverter
     name: "${friendly_name} PV1 Current"
-    id: inverter_esphome_pv1_current
+    id: solark_esphome_pv1_current
     register_type: holding
     address: 110
     unit_of_measurement: "A"
@@ -686,7 +712,7 @@ sensor:
   - platform: modbus_controller            # 187 PV2 Power
     modbus_controller_id: inverter
     name: "${friendly_name} PV2 Power"
-    id: inverter_esphome_pv2_power
+    id: solark_esphome_pv2_power
     register_type: holding
     address: 187
     unit_of_measurement: "W"
@@ -698,7 +724,7 @@ sensor:
   - platform: modbus_controller            # 111 PV2 Voltage
     modbus_controller_id: inverter
     name: "${friendly_name} PV2 Voltage"
-    id: inverter_esphome_pv2_voltage
+    id: solark_esphome_pv2_voltage
     register_type: holding
     address: 111
     unit_of_measurement: "V"
@@ -712,7 +738,7 @@ sensor:
   - platform: modbus_controller            # 112 PV2 Current
     modbus_controller_id: inverter
     name: "${friendly_name} PV2 Current"
-    id: inverter_esphome_pv2_current
+    id: solark_esphome_pv2_current
     register_type: holding
     address: 112
     unit_of_measurement: "A"
@@ -725,11 +751,11 @@ sensor:
 
 #################################################### SOLAR PV3 #############################################
 #### Uncomment this if you have a third MPPT single phase
-    
+
   #- platform: modbus_controller            # 188 PV3 Power
   #  modbus_controller_id: inverter
   #  name: "${friendly_name} PV3 Power"
-  #  id: inverter_esphome_pv3_power
+  #  id: solark_esphome_pv3_power
   #  register_type: holding
   #  address: 188
   #  unit_of_measurement: "W"
@@ -741,7 +767,7 @@ sensor:
   #- platform: modbus_controller            # 113 PV3 Voltage
   #  modbus_controller_id: inverter
   #  name: "${friendly_name} PV3 Voltage"
-  #  id: inverter_esphome_pv3_voltage
+  #  id: solark_esphome_pv3_voltage
   #  register_type: holding
   #  address: 113
   #  unit_of_measurement: "V"
@@ -755,7 +781,7 @@ sensor:
   #- platform: modbus_controller            # 114 PV3 Current
   #  modbus_controller_id: inverter
   #  name: "${friendly_name} PV3 Current"
-  #  id: inverter_esphome_pv3_current
+  #  id: solark_esphome_pv3_current
   #  register_type: holding
   #  address: 114
   #  unit_of_measurement: "A"
@@ -772,23 +798,23 @@ sensor:
   - platform: template                     # Sum of PV1 and PV2 to get total PV Power
     name: "${friendly_name} Solar Power"
     unit_of_measurement: "W"
-    id: inverter_esphome_pv_total
+    id: solark_esphome_pv_total
     accuracy_decimals: 0
     device_class: power
     state_class: measurement
     lambda: |-
-      return (id(inverter_esphome_pv1_power).state + id(inverter_esphome_pv2_power).state);
+      return (id(solark_esphome_pv1_power).state + id(solark_esphome_pv2_power).state);
     update_interval: 5s
     
   #- platform: template                     # Sum of PV1, PV2 and PV3 to get total PV Power
   #  name: "${friendly_name} Solar Power"
   #  unit_of_measurement: "W"
-  #  id: inverter_esphome_pv_total
+  #  id: solark_esphome_pv_total
   #  accuracy_decimals: 0
   #  device_class: power
   #  state_class: measurement
   #  lambda: |-
-  #    return (id(inverter_esphome_pv1_power).state + id(inverter_esphome_pv2_power).state + id(inverter_esphome_pv3_power).state);
+  #    return (id(solark_esphome_pv1_power).state + id(solark_esphome_pv2_power).state + id(solark_esphome_pv3_power).state);
   #  update_interval: 5s
 
 ############################################### OUTPUTS ###############################################
@@ -796,7 +822,7 @@ sensor:
   - platform: modbus_controller            # 166 Aux Power
     modbus_controller_id: inverter
     name: "${friendly_name} AUX Power"
-    id: inverter_esphome_aux_power
+    id: solark_esphome_aux_power
     register_type: holding
     address: 166
     unit_of_measurement: "W"
@@ -812,7 +838,7 @@ sensor:
     device_class: power
     state_class: measurement
     lambda: |-
-      return (id(inverter_esphome_inverter_power).state + id(inverter_esphome_grid_power_167).state - id(inverter_esphome_aux_power).state);
+      return (id(solark_esphome_solark_power).state + id(solark_esphome_grid_power_167).state - id(solark_esphome_aux_power).state);
     update_interval: 5s
 
   - platform: template                     # Essential Power1 based on register 175 + 169 - 166
@@ -822,7 +848,7 @@ sensor:
     device_class: power
     state_class: measurement
     lambda: |-
-      return (id(inverter_esphome_inverter_power).state + id(inverter_esphome_grid_power_169).state - id(inverter_esphome_aux_power).state);
+      return (id(solark_esphome_solark_power).state + id(solark_esphome_grid_power_169).state - id(solark_esphome_aux_power).state);
     update_interval: 5s
 
   - platform: template                     # Nonessential Power 172 - 167
@@ -832,7 +858,7 @@ sensor:
     device_class: power
     state_class: measurement
     lambda: |-
-      return (id(inverter_esphome_grid_ct_power).state - id(inverter_esphome_grid_power_167).state);
+      return (id(solark_esphome_grid_ct_power).state - id(solark_esphome_grid_power_167).state);
     update_interval: 5s
 
   - platform: template                     # Nonessential Power1 172 - 169
@@ -842,7 +868,7 @@ sensor:
     device_class: power
     state_class: measurement
     lambda: |-
-      return (id(inverter_esphome_grid_ct_power).state - id(inverter_esphome_grid_power_169).state);
+      return (id(solark_esphome_grid_ct_power).state - id(solark_esphome_grid_power_169).state);
     update_interval: 5s
 
 
@@ -851,7 +877,7 @@ sensor:
   - platform: modbus_controller            # 070 Day Battery Charge
     modbus_controller_id: inverter
     name: "${friendly_name} Day Battery Charge"
-    id: inverter_esphome_day_battery_charge
+    id: solark_esphome_day_battery_charge
     register_type: holding
     address: 70
     unit_of_measurement: "kWh"
@@ -865,7 +891,7 @@ sensor:
   - platform: modbus_controller            # 071 Day Battery Discharge
     modbus_controller_id: inverter
     name: "${friendly_name} Day Battery Discharge"
-    id: inverter_esphome_day_battery_discharge
+    id: solark_esphome_day_battery_discharge
     register_type: holding
     address: 71
     unit_of_measurement: "kWh"
@@ -879,7 +905,7 @@ sensor:
   - platform: modbus_controller            # 072 Total Battery Charge
     modbus_controller_id: inverter
     name: "${friendly_name} Total Battery Charge"
-    id: inverter_esphome_total_battery_charge
+    id: solark_esphome_total_battery_charge
     register_type: holding
     address: 72
     unit_of_measurement: "kWh"
@@ -893,7 +919,7 @@ sensor:
   - platform: modbus_controller            # 074 Total Battery Discharge
     modbus_controller_id: inverter
     name: "${friendly_name} Total Battery Discharge"
-    id: inverter_esphome_total_battery_discharge
+    id: solark_esphome_total_battery_discharge
     register_type: holding
     address: 74
     unit_of_measurement: "kWh"
@@ -907,7 +933,7 @@ sensor:
   - platform: modbus_controller            # 076 Day Grid Import
     modbus_controller_id: inverter
     name: "${friendly_name} Day Grid Import"
-    id: inverter_esphome_day_grid_import
+    id: solark_esphome_day_grid_import
     register_type: holding
     address: 76
     unit_of_measurement: "kWh"
@@ -921,7 +947,7 @@ sensor:
   - platform: modbus_controller            # 077 Day Grid Export
     modbus_controller_id: inverter
     name: "${friendly_name} Day Grid Export"
-    id: inverter_esphome_day_grid_export
+    id: solark_esphome_day_grid_export
     register_type: holding
     address: 77
     unit_of_measurement: "kWh"
@@ -935,7 +961,7 @@ sensor:
   - platform: modbus_controller            # 078 Total Grid Import
     modbus_controller_id: inverter
     name: "${friendly_name} Total Grid Import"
-    id: inverter_esphome_total_grid_import
+    id: solark_esphome_total_grid_import
     register_type: holding
     address: 78
     unit_of_measurement: "kWh"
@@ -949,7 +975,7 @@ sensor:
   - platform: modbus_controller            # 081 Total Grid Export
     modbus_controller_id: inverter
     name: "${friendly_name} Total Grid Export"
-    id: inverter_esphome_total_grid_export
+    id: solark_esphome_total_grid_export
     register_type: holding
     address: 81
     unit_of_measurement: "kWh"
@@ -963,7 +989,7 @@ sensor:
   - platform: modbus_controller            # 084 Day Load Energy
     modbus_controller_id: inverter
     name: "${friendly_name} Day Load Energy"
-    id: inverter_esphome_day_load_energy
+    id: solark_esphome_day_load_energy
     register_type: holding
     address: 84
     unit_of_measurement: "kWh"
@@ -977,7 +1003,7 @@ sensor:
   - platform: modbus_controller            # 085 Total Load Energy
     modbus_controller_id: inverter
     name: "${friendly_name} Total Load Energy"
-    id: inverter_esphome_total_load_energy
+    id: solark_esphome_total_load_energy
     register_type: holding
     address: 85
     unit_of_measurement: "kWh"
@@ -991,7 +1017,7 @@ sensor:
   - platform: modbus_controller            # 096 Total PV Energy
     modbus_controller_id: inverter
     name: "${friendly_name} Total PV Energy"
-    id: inverter_esphome_total_pv_energy
+    id: solark_esphome_total_pv_energy
     register_type: holding
     address: 96
     unit_of_measurement: "kWh"
@@ -1005,7 +1031,7 @@ sensor:
   - platform: modbus_controller            # 108 Day PV Energy
     modbus_controller_id: inverter
     name: "${friendly_name} Day PV Energy"
-    id: inverter_esphome_day_pv_energy
+    id: solark_esphome_day_pv_energy
     register_type: holding
     address: 108
     unit_of_measurement: "kWh"
@@ -1022,7 +1048,7 @@ sensor:
 
   - platform: total_daily_energy           # Day PV Energy
     name: "${friendly_name} Day PV Energy Local"
-    power_id: inverter_esphome_pv_total
+    power_id: solark_esphome_pv_total
     unit_of_measurement: 'kWh'
     state_class: total_increasing
     device_class: energy
@@ -1034,7 +1060,7 @@ sensor:
 
   - platform: total_daily_energy           # Day Battery Charge Energy
     name: "${friendly_name} Day Battery Charge Energy Local"
-    power_id: inverter_esphome_battery_power_charge
+    power_id: solark_esphome_battery_power_charge
     unit_of_measurement: 'kWh'
     state_class: total_increasing
     device_class: energy
@@ -1046,7 +1072,7 @@ sensor:
 
   - platform: total_daily_energy           # Day Battery DisCharge Energy
     name: "${friendly_name} Day Battery Discharge Energy Local"
-    power_id: inverter_esphome_battery_power_discharge
+    power_id: solark_esphome_battery_power_discharge
     unit_of_measurement: 'kWh'
     state_class: total_increasing
     device_class: energy
@@ -1058,7 +1084,7 @@ sensor:
 
   - platform: total_daily_energy           # Day Load Energy
     name: "${friendly_name} Day Load Energy Local"
-    power_id: inverter_esphome_load_power
+    power_id: solark_esphome_load_power
     unit_of_measurement: 'kWh'
     state_class: total_increasing
     device_class: energy
@@ -1070,7 +1096,7 @@ sensor:
 
   - platform: total_daily_energy           # Day Grid Import Energy
     name: "${friendly_name} Day Grid Import Energy Local"
-    power_id: inverter_esphome_grid_ct_power_import
+    power_id: solark_esphome_grid_ct_power_import
     unit_of_measurement: 'kWh'
     state_class: total_increasing
     device_class: energy
@@ -1082,7 +1108,7 @@ sensor:
 
   - platform: total_daily_energy           # Day Grid Export Energy
     name: "${friendly_name} Day Grid Export Energy Local"
-    power_id: inverter_esphome_grid_ct_power_export
+    power_id: solark_esphome_grid_ct_power_export
     unit_of_measurement: 'kWh'
     state_class: total_increasing
     device_class: energy
@@ -1097,7 +1123,7 @@ sensor:
   - platform: modbus_controller            # 090 DC Transformer Temperature
     modbus_controller_id: inverter
     name: "${friendly_name} DC Transformer Temperature"
-    id: inverter_esphome_dc_transformer_temperature
+    id: solark_esphome_dc_transformer_temperature
     register_type: holding
     address: 090
     unit_of_measurement: "°C"
@@ -1112,7 +1138,7 @@ sensor:
   - platform: modbus_controller            # 091 Radiator Temperature
     modbus_controller_id: inverter
     name: "${friendly_name} Radiator Temperature"
-    id: inverter_esphome_radiator_temperature
+    id: solark_esphome_radiator_temperature
     register_type: holding
     address: 091
     unit_of_measurement: "°C"
@@ -1129,7 +1155,7 @@ sensor:
   - platform: modbus_controller            # 250 Prog1 Time
     modbus_controller_id: inverter
     name: "${friendly_name} Prog1 Time"
-    id: inverter_esphome_system_mode_time1
+    id: solark_esphome_system_mode_time1
     register_type: holding
     skip_updates: ${settings_skipped_updates}
     address: 250
@@ -1138,7 +1164,7 @@ sensor:
   - platform: modbus_controller            # 251 Prog2 Time
     modbus_controller_id: inverter
     name: "${friendly_name} Prog2 Time"
-    id: inverter_esphome_system_mode_time2
+    id: solark_esphome_system_mode_time2
     register_type: holding
     skip_updates: ${settings_skipped_updates}
     address: 251   
@@ -1147,7 +1173,7 @@ sensor:
   - platform: modbus_controller            # 252 Prog3 Time
     modbus_controller_id: inverter
     name: "${friendly_name} Prog3 Time"
-    id: inverter_esphome_system_mode_time3
+    id: solark_esphome_system_mode_time3
     register_type: holding
     skip_updates: ${settings_skipped_updates}
     address: 252
@@ -1156,7 +1182,7 @@ sensor:
   - platform: modbus_controller            # 253 Prog4 Time
     modbus_controller_id: inverter
     name: "${friendly_name} Prog4 Time"
-    id: inverter_esphome_system_mode_time4
+    id: solark_esphome_system_mode_time4
     register_type: holding
     skip_updates: ${settings_skipped_updates}
     address: 253
@@ -1165,7 +1191,7 @@ sensor:
   - platform: modbus_controller            # 254 Prog5 Time
     modbus_controller_id: inverter
     name: "${friendly_name} Prog5 Time"
-    id: inverter_esphome_system_mode_time5
+    id: solark_esphome_system_mode_time5
     register_type: holding
     skip_updates: ${settings_skipped_updates}
     address: 254
@@ -1174,7 +1200,7 @@ sensor:
   - platform: modbus_controller            # 255 Prog6 Time
     modbus_controller_id: inverter
     name: "${friendly_name} Prog6 Time"
-    id: inverter_esphome_system_mode_time6
+    id: solark_esphome_system_mode_time6
     register_type: holding
     skip_updates: ${settings_skipped_updates}
     address: 255
@@ -1263,7 +1289,7 @@ switch:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Toggle Grid Charge"
-    id: inverter_esphome_toggle_grid_charge
+    id: solark_esphome_toggle_grid_charge
     register_type: holding
     address: 232
     bitmask: 1
@@ -1273,7 +1299,7 @@ switch:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Toggle Generator Charge"
-    id: inverter_esphome_toggle_generator_charge
+    id: solark_esphome_toggle_generator_charge
     register_type: holding
     address: 231
     bitmask: 1
@@ -1283,7 +1309,7 @@ switch:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Toggle Force Generator"
-    id: inverter_esphome_toggle_force_generator
+    id: solark_esphome_toggle_force_generator
     register_type: holding
     address: 326
     bitmask: 8192 # 2^13 to target bit 13
@@ -1293,7 +1319,7 @@ switch:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Toggle Solar sell"
-    id: inverter_esphome_toggle_solar_sell
+    id: solark_esphome_toggle_solar_sell
     register_type: holding
     address: 247
     bitmask: 1
@@ -1303,7 +1329,7 @@ switch:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Toggle System Timer" 
-    id: inverter_esphome_toggle_Time_of_Use
+    id: solark_esphome_toggle_Time_of_Use
     register_type: holding
     address: 248
     bitmask: 1
@@ -1313,7 +1339,7 @@ switch:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Toggle Priority Load" 
-    id: inverter_esphome_toggle_priority_load
+    id: solark_esphome_toggle_priority_load
     register_type: holding
     address: 243
     bitmask: 1
@@ -1323,7 +1349,7 @@ switch:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Prog1 Grid Charge"
-    id: inverter_esphome_toggle_grid_charge_time1
+    id: solark_esphome_toggle_grid_charge_time1
     register_type: holding
     address: 274
     bitmask: 1
@@ -1333,7 +1359,7 @@ switch:
     modbus_controller_id: inverter
     use_write_multiple: true
     name: "${friendly_name} Prog2 Grid Charge"
-    id: inverter_esphome_toggle_grid_charge_time2
+    id: solark_esphome_toggle_grid_charge_time2
     register_type: holding
     address: 275
     bitmask: 1
@@ -1343,7 +1369,7 @@ switch:
     modbus_controller_id: inverter
     use_write_multiple: true
     name: "${friendly_name} Prog3 Grid Charge"
-    id: inverter_esphome_toggle_grid_charge_time3
+    id: solark_esphome_toggle_grid_charge_time3
     register_type: holding
     address: 276
     bitmask: 1
@@ -1353,7 +1379,7 @@ switch:
     modbus_controller_id: inverter
     use_write_multiple: true
     name: "${friendly_name} Prog4 Grid Charge"
-    id: inverter_esphome_toggle_grid_charge_time4
+    id: solark_esphome_toggle_grid_charge_time4
     register_type: holding
     address: 277
     bitmask: 1
@@ -1363,7 +1389,7 @@ switch:
     modbus_controller_id: inverter
     use_write_multiple: true
     name: "${friendly_name} Prog5 Grid Charge"
-    id: inverter_esphome_toggle_grid_charge_time5
+    id: solark_esphome_toggle_grid_charge_time5
     register_type: holding
     address: 278
     bitmask: 1
@@ -1373,7 +1399,7 @@ switch:
     modbus_controller_id: inverter
     use_write_multiple: true
     name: "${friendly_name} Prog6 Grid Charge"
-    id: inverter_esphome_toggle_grid_charge_time6
+    id: solark_esphome_toggle_grid_charge_time6
     register_type: holding
     address: 279
     bitmask: 1
@@ -1383,7 +1409,7 @@ number:
   - platform: modbus_controller            # 268 Prog1 Capacity
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_soc_time1
+    id: solark_esphome_set_soc_time1
     name: "${friendly_name} Prog1 Capacity"
     unit_of_measurement: "%"
     address: 268
@@ -1395,7 +1421,7 @@ number:
   - platform: modbus_controller            # 269 Prog2 Capacity
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_soc_time2
+    id: solark_esphome_set_soc_time2
     name: "${friendly_name} Prog2 Capacity"
     unit_of_measurement: "%"
     address: 269
@@ -1407,7 +1433,7 @@ number:
   - platform: modbus_controller            # 270 Prog3 Capacity
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_soc_time3
+    id: solark_esphome_set_soc_time3
     name: "${friendly_name} Prog3 Capacity"
     unit_of_measurement: "%"
     address: 270
@@ -1419,7 +1445,7 @@ number:
   - platform: modbus_controller            # 271 Prog4 Capacity
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_soc_time4
+    id: solark_esphome_set_soc_time4
     name: "${friendly_name} Prog4 Capacity"
     unit_of_measurement: "%"
     address: 271
@@ -1431,7 +1457,7 @@ number:
   - platform: modbus_controller            # 272 Prog5 Capacity
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_soc_time5
+    id: solark_esphome_set_soc_time5
     name: "${friendly_name} Prog5 Capacity"
     unit_of_measurement: "%"
     address: 272
@@ -1443,7 +1469,7 @@ number:
   - platform: modbus_controller            # 273 Prog6 Capacity
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_soc_time6
+    id: solark_esphome_set_soc_time6
     name: "${friendly_name} Prog6 Capacity"
     unit_of_measurement: "%"
     address: 273
@@ -1455,7 +1481,7 @@ number:
   - platform: modbus_controller            # 256 Prog1 Power
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_power_time1
+    id: solark_esphome_set_power_time1
     name: "${friendly_name} Prog1 Power"
     unit_of_measurement: "W"
     address: 256
@@ -1467,7 +1493,7 @@ number:
   - platform: modbus_controller            # 257 Prog2 Power
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_power_time2
+    id: solark_esphome_set_power_time2
     name: "${friendly_name} Prog2 Power"
     unit_of_measurement: "W"
     address: 257
@@ -1479,7 +1505,7 @@ number:
   - platform: modbus_controller            # 258 Prog3 Power
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_power_time3
+    id: solark_esphome_set_power_time3
     name: "${friendly_name} Prog3 Power"
     unit_of_measurement: "W"
     address: 258
@@ -1491,7 +1517,7 @@ number:
   - platform: modbus_controller            # 259 Prog4 Power
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_power_time4
+    id: solark_esphome_set_power_time4
     name: "${friendly_name} Prog4 Power"
     unit_of_measurement: "W"
     address: 259
@@ -1503,7 +1529,7 @@ number:
   - platform: modbus_controller            # 260 Prog5 Power
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_power_time5
+    id: solark_esphome_set_power_time5
     name: "${friendly_name} Prog5 Power"
     unit_of_measurement: "W"
     address: 260
@@ -1515,7 +1541,7 @@ number:
   - platform: modbus_controller            # 261 Prog6 Power
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_power_time6
+    id: solark_esphome_set_power_time6
     name: "${friendly_name} Prog6 Power"
     unit_of_measurement: "W"
     address: 261
@@ -1527,7 +1553,7 @@ number:
   - platform: modbus_controller            # 262 Prog1 Voltage
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_voltage_time1
+    id: solark_esphome_set_voltage_time1
     name: "${friendly_name} Prog1 Voltage"
     unit_of_measurement: "V"
     address: 262
@@ -1542,7 +1568,7 @@ number:
   - platform: modbus_controller            # 263 Prog2 Voltage
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_voltage_time2
+    id: solark_esphome_set_voltage_time2
     name: "${friendly_name} Prog2 Voltage"
     unit_of_measurement: "V"
     address: 263
@@ -1557,7 +1583,7 @@ number:
   - platform: modbus_controller            # 264 Prog3 Voltage
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_voltage_time3
+    id: solark_esphome_set_voltage_time3
     name: "${friendly_name} Prog3 Voltage"
     unit_of_measurement: "V"
     address: 264
@@ -1572,7 +1598,7 @@ number:
   - platform: modbus_controller            # 265 Prog4 Voltage
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_voltage_time4
+    id: solark_esphome_set_voltage_time4
     name: "${friendly_name} Prog4 Voltage"
     unit_of_measurement: "V"
     address: 265
@@ -1587,7 +1613,7 @@ number:
   - platform: modbus_controller            # 266 Prog5 Voltage
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_voltage_time5
+    id: solark_esphome_set_voltage_time5
     name: "${friendly_name} Prog5 Voltage"
     unit_of_measurement: "V"
     address: 266
@@ -1602,7 +1628,7 @@ number:
   - platform: modbus_controller            # 267 Prog6 Voltage
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_set_voltage_time6
+    id: solark_esphome_set_voltage_time6
     name: "${friendly_name} Prog6 Voltage"
     unit_of_measurement: "V"
     address: 267
@@ -1617,7 +1643,7 @@ number:
   - platform: modbus_controller            # 230 Grid Charge Battery current
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_grid_charge_bat_current
+    id: solark_esphome_grid_charge_bat_current
     name: "${friendly_name} Grid Charge Battery current"
     unit_of_measurement: "A"
     address: 230
@@ -1629,7 +1655,7 @@ number:
   - platform: modbus_controller            # 210 Battery Max Charge current
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_bat_max_charge_current
+    id: solark_esphome_bat_max_charge_current
     name: "${friendly_name} Battery Max Charge current"
     unit_of_measurement: "A"
     address: 210
@@ -1641,7 +1667,7 @@ number:
   - platform: modbus_controller            # 211 Battery Max Discharge current
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_bat_max_discharge_current
+    id: solark_esphome_bat_max_discharge_current
     name: "${friendly_name} Battery Max Discharge current"
     unit_of_measurement: "A"
     address: 211
@@ -1654,7 +1680,7 @@ number:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Grid Peak shaving power"
-    id: inverter_grid_peak_shaving_power
+    id: solark_grid_peak_shaving_power
     address: 293
     unit_of_measurement: "W"
     min_value: 0
@@ -1666,7 +1692,7 @@ number:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Max Sell power"
-    id: inverter_max_sell_power
+    id: solark_max_sell_power
     address: 245
     unit_of_measurement: "W"
     min_value: 0
@@ -1680,7 +1706,7 @@ text_sensor:
   - platform: modbus_controller            # 059 Overall State
     modbus_controller_id: inverter
     name: "${friendly_name} Overall State"
-    id: inverter_esphome_overall_state
+    id: solark_esphome_overall_state
     register_type: holding
     skip_updates: ${settings_skipped_updates}
     raw_encode: HEXBYTES
@@ -1698,13 +1724,13 @@ text_sensor:
 
   - platform: template                     # Prog Time 1 Friendly Name
     name: "${friendly_name} Time Slot 1"
-    id: inverter_esphome_time_slot_1
+    id: solark_esphome_time_slot_1
     icon: "mdi:clock"
     lambda: |-
         int minutes, hours;
-        if (id(inverter_esphome_system_mode_time1).state) {
-        minutes = static_cast<int>(id(inverter_esphome_system_mode_time1).state) % 100;
-        hours = static_cast<int>(id(inverter_esphome_system_mode_time1).state) / 100;
+        if (id(solark_esphome_system_mode_time1).state) {
+        minutes = static_cast<int>(id(solark_esphome_system_mode_time1).state) % 100;
+        hours = static_cast<int>(id(solark_esphome_system_mode_time1).state) / 100;
         } else {
           minutes = 0;
           hours = 0;
@@ -1715,13 +1741,13 @@ text_sensor:
 
   - platform: template                     # Prog Time 2 Friendly Name
     name: "${friendly_name} Time Slot 2"
-    id: inverter_esphome_time_slot_2
+    id: solark_esphome_time_slot_2
     icon: "mdi:clock"
     lambda: |-
         int minutes, hours;
-        if (id(inverter_esphome_system_mode_time2).state) {
-        minutes = static_cast<int>(id(inverter_esphome_system_mode_time2).state) % 100;
-        hours = static_cast<int>(id(inverter_esphome_system_mode_time2).state) / 100;
+        if (id(solark_esphome_system_mode_time2).state) {
+        minutes = static_cast<int>(id(solark_esphome_system_mode_time2).state) % 100;
+        hours = static_cast<int>(id(solark_esphome_system_mode_time2).state) / 100;
         } else {
           minutes = 0;
           hours = 0;
@@ -1732,13 +1758,13 @@ text_sensor:
 
   - platform: template                     # Prog Time 3 Friendly Name
     name: "${friendly_name} Time Slot 3"
-    id: inverter_esphome_time_slot_3
+    id: solark_esphome_time_slot_3
     icon: "mdi:clock"
     lambda: |-
         int minutes, hours;
-        if (id(inverter_esphome_system_mode_time3).state) {
-        minutes = static_cast<int>(id(inverter_esphome_system_mode_time3).state) % 100;
-        hours = static_cast<int>(id(inverter_esphome_system_mode_time3).state) / 100;
+        if (id(solark_esphome_system_mode_time3).state) {
+        minutes = static_cast<int>(id(solark_esphome_system_mode_time3).state) % 100;
+        hours = static_cast<int>(id(solark_esphome_system_mode_time3).state) / 100;
         } else {
           minutes = 0;
           hours = 0;
@@ -1749,13 +1775,13 @@ text_sensor:
 
   - platform: template                     # Prog Time 4 Friendly Name
     name: "${friendly_name} Time Slot 4"
-    id: inverter_esphome_time_slot_4
+    id: solark_esphome_time_slot_4
     icon: "mdi:clock"
     lambda: |-
         int minutes, hours;
-        if (id(inverter_esphome_system_mode_time4).state) {
-        minutes = static_cast<int>(id(inverter_esphome_system_mode_time4).state) % 100;
-        hours = static_cast<int>(id(inverter_esphome_system_mode_time4).state) / 100;
+        if (id(solark_esphome_system_mode_time4).state) {
+        minutes = static_cast<int>(id(solark_esphome_system_mode_time4).state) % 100;
+        hours = static_cast<int>(id(solark_esphome_system_mode_time4).state) / 100;
         } else {
           minutes = 0;
           hours = 0;
@@ -1766,13 +1792,13 @@ text_sensor:
 
   - platform: template                     # Prog Time 5 Friendly Name
     name: "${friendly_name} Time Slot 5"
-    id: inverter_esphome_time_slot_5
+    id: solark_esphome_time_slot_5
     icon: "mdi:clock"
     lambda: |-
         int minutes, hours;
-        if (id(inverter_esphome_system_mode_time5).state) {
-        minutes = static_cast<int>(id(inverter_esphome_system_mode_time5).state) % 100;
-        hours = static_cast<int>(id(inverter_esphome_system_mode_time5).state) / 100;
+        if (id(solark_esphome_system_mode_time5).state) {
+        minutes = static_cast<int>(id(solark_esphome_system_mode_time5).state) % 100;
+        hours = static_cast<int>(id(solark_esphome_system_mode_time5).state) / 100;
         } else {
           minutes = 0;
           hours = 0;
@@ -1783,13 +1809,13 @@ text_sensor:
 
   - platform: template                     # Prog Time 6 Friendly Name
     name: "${friendly_name} Time Slot 6"
-    id: inverter_esphome_time_slot_6
+    id: solark_esphome_time_slot_6
     icon: "mdi:clock"
     lambda: |-
         int minutes, hours;
-        if (id(inverter_esphome_system_mode_time6).state) {
-        minutes = static_cast<int>(id(inverter_esphome_system_mode_time6).state) % 100;
-        hours = static_cast<int>(id(inverter_esphome_system_mode_time6).state) / 100;
+        if (id(solark_esphome_system_mode_time6).state) {
+        minutes = static_cast<int>(id(solark_esphome_system_mode_time6).state) % 100;
+        hours = static_cast<int>(id(solark_esphome_system_mode_time6).state) / 100;
         } else {
           minutes = 0;
           hours = 0;
@@ -1800,7 +1826,7 @@ text_sensor:
 
   - platform: modbus_controller            # 003-007 Inverter HEX Serial Number
     modbus_controller_id: inverter
-    id: inverter_esphome_serial
+    id: solark_esphome_serial
     register_type: holding
     skip_updates: ${settings_skipped_updates}
     raw_encode: HEXBYTES
@@ -1812,10 +1838,10 @@ text_sensor:
 
   - platform: template                     # Inverter ASCII Serial Number
     name: "${friendly_name} Serial"
-    id: inverter_esphome_ascii_serial
+    id: solark_esphome_ascii_serial
     icon: "mdi:text"
     lambda: |-
-      std::string hexData = id(inverter_esphome_serial).state;
+      std::string hexData = id(solark_esphome_serial).state;
 
       // Convert hex-encoded string to ASCII
       std::string asciiData;
@@ -1829,7 +1855,7 @@ text_sensor:
 
   - platform: modbus_controller            # 013 Inverter MCU Firmware Version
     modbus_controller_id: inverter
-    id: inverter_esphome_MCU_version_13
+    id: solark_esphome_MCU_version_13
     register_type: holding
     skip_updates: ${settings_skipped_updates}
     raw_encode: HEXBYTES
@@ -1838,7 +1864,7 @@ text_sensor:
 
   - platform: modbus_controller            # 015 Inverter MCU Firmware Version
     modbus_controller_id: inverter
-    id: inverter_esphome_MCU_version_15
+    id: solark_esphome_MCU_version_15
     register_type: holding
     skip_updates: ${settings_skipped_updates}
     raw_encode: HEXBYTES
@@ -1847,14 +1873,14 @@ text_sensor:
 
   - platform: template                      # 015-013 Inverter MCU version
     name: "${friendly_name} MCU Version"
-    id: inverter_esphome_main_version
+    id: solark_esphome_main_version
     icon: "mdi:text"
     lambda: |-
-      return id( inverter_esphome_MCU_version_15).state + "-" + id(inverter_esphome_MCU_version_13).state;
+      return id( solark_esphome_MCU_version_15).state + "-" + id(solark_esphome_MCU_version_13).state;
 
   - platform: modbus_controller             # 016 Inverter LCD Firmware Version
     modbus_controller_id: inverter
-    id: inverter_esphome_comm_lcd_firmware_16
+    id: solark_esphome_comm_lcd_firmware_16
     name: "${friendly_name} COMM Version"
     register_type: holding
     skip_updates: ${settings_skipped_updates}
@@ -1868,7 +1894,7 @@ select:
   - platform: modbus_controller            #243 Select Energy Patern
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_select_energy_pattern
+    id: solark_esphome_select_energy_pattern
     name: "${friendly_name} Energy Pattern"
     address: 243
     value_type: U_WORD
@@ -1879,7 +1905,7 @@ select:
   - platform: modbus_controller            #244 Select Work Mode
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_select_work_mode
+    id: solark_esphome_select_work_mode
     name: "${friendly_name} Work Mode"
     address: 244
     value_type: U_WORD
@@ -1891,7 +1917,7 @@ select:
   - platform: modbus_controller            #235 Select Generator Input
     use_write_multiple: true
     modbus_controller_id: inverter
-    id: inverter_esphome_select_generator_input
+    id: solark_esphome_select_generator_input
     name: "${friendly_name} Generator Input"
     address: 235
     value_type: U_WORD
@@ -1904,7 +1930,7 @@ select:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Grid Peak Shaving"
-    id: inverter_esphome_select_grid_peak_shaving
+    id: solark_esphome_select_grid_peak_shaving
     address: 280
     value_type: U_WORD
     optionsmap:
@@ -1932,7 +1958,7 @@ select:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Prog1 Charge Option"
-    id: inverter_esphome_select_system_mode_charge_option_time_1
+    id: solark_esphome_select_system_mode_charge_option_time_1
     address: 274
     value_type: U_WORD
     optionsmap:
@@ -1959,7 +1985,7 @@ select:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Prog2 Charge Option"
-    id: inverter_esphome_select_system_mode_charge_option_time_2
+    id: solark_esphome_select_system_mode_charge_option_time_2
     address: 275
     value_type: U_WORD
     optionsmap:
@@ -1986,7 +2012,7 @@ select:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Prog3 Charge Option"
-    id: inverter_esphome_select_system_mode_charge_option_time_3
+    id: solark_esphome_select_system_mode_charge_option_time_3
     address: 276
     value_type: U_WORD
     optionsmap:
@@ -2013,7 +2039,7 @@ select:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Prog4 Charge Option"
-    id: inverter_esphome_select_system_mode_charge_option_time_4
+    id: solark_esphome_select_system_mode_charge_option_time_4
     address: 277
     value_type: U_WORD
     optionsmap:
@@ -2040,7 +2066,7 @@ select:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Prog5 Charge Option"
-    id: inverter_esphome_select_system_mode_charge_option_time_5
+    id: solark_esphome_select_system_mode_charge_option_time_5
     address: 278
     value_type: U_WORD
     optionsmap:
@@ -2067,7 +2093,7 @@ select:
     use_write_multiple: true
     modbus_controller_id: inverter
     name: "${friendly_name} Prog6 Charge Option"
-    id: inverter_esphome_select_system_mode_charge_option_time_6
+    id: solark_esphome_select_system_mode_charge_option_time_6
     address: 279
     value_type: U_WORD
     optionsmap:
@@ -2095,7 +2121,7 @@ select:
   #   use_write_multiple: true
   #   modbus_controller_id: inverter
   #   name: "${friendly_name} Prog1 Mode Option"
-  #   id: inverter_esphome_select_system_mode_program_option_time_1
+  #   id: solark_esphome_select_system_mode_program_option_time_1
   #   address: 274
   #   value_type: U_WORD
   #   optionsmap:
@@ -2122,7 +2148,7 @@ select:
   #   use_write_multiple: true
   #   modbus_controller_id: inverter
   #   name: "${friendly_name} Prog2 Mode Option"
-  #   id: inverter_esphome_select_system_mode_program_option_time_2
+  #   id: solark_esphome_select_system_mode_program_option_time_2
   #   address: 275
   #   value_type: U_WORD
   #   optionsmap:
@@ -2149,7 +2175,7 @@ select:
   #   use_write_multiple: true
   #   modbus_controller_id: inverter
   #   name: "${friendly_name} Prog3 Mode Option"
-  #   id: inverter_esphome_select_system_mode_program_option_time_3
+  #   id: solark_esphome_select_system_mode_program_option_time_3
   #   address: 276
   #   value_type: U_WORD
   #   optionsmap:
@@ -2176,7 +2202,7 @@ select:
   #   use_write_multiple: true
   #   modbus_controller_id: inverter
   #   name: "${friendly_name} Prog4 Mode Option"
-  #   id: inverter_esphome_select_system_mode_program_option_time_4
+  #   id: solark_esphome_select_system_mode_program_option_time_4
   #   address: 277
   #   value_type: U_WORD
   #   optionsmap:
@@ -2203,7 +2229,7 @@ select:
   #   use_write_multiple: true
   #   modbus_controller_id: inverter
   #   name: "${friendly_name} Prog5 Mode Option"
-  #   id: inverter_esphome_select_system_mode_program_option_time_5
+  #   id: solark_esphome_select_system_mode_program_option_time_5
   #   address: 278
   #   value_type: U_WORD
   #   optionsmap:
@@ -2230,7 +2256,7 @@ select:
   #   use_write_multiple: true
   #   modbus_controller_id: inverter
   #   name: "${friendly_name} Prog6 Mode Option"
-  #   id: inverter_esphome_select_system_mode_program_option_time_6
+  #   id: solark_esphome_select_system_mode_program_option_time_6
   #   address: 279
   #   value_type: U_WORD
   #   optionsmap:
