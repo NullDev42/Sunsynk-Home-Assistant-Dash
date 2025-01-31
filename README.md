@@ -14,6 +14,11 @@ To provide a means for communicating with one or more Sol-Ark/Deye/Sunsynk inver
 
 3. The LilyGo T-CAN485 board needs a power supply.  A standard 5V DC supply can be connected to the USB-C port. Alternatively, a 5-12V DC supply can be connected to the DC power header.
 
+4. (Optional) There are a few printed enclosure designs available for this PCB.
+    - [Printables 1](https://www.printables.com/model/949875-lilygo-t-can485-case) - NouveauDommag_200197
+    - [Thingiverse 1](https://www.thingiverse.com/thing:6196129) - janneman001
+    - [Thingiverse 2](https://www.thingiverse.com/thing:6788996) - CMDRTheoJones
+
 # Firmware
 ESPHome can be installed in a number of ways. I prefer to use docker-compose, so it would look something like this:
 
@@ -36,10 +41,10 @@ Make sure to substitute the appropriate folder in place of "/your/esphome/config
 
 Alternatively, ESPHome can be installed as an add-on within Home Assistant by following the instructions [here](https://esphome.io/guides/getting_started_hassio).
 
-Once ESPHome is running, create a new device on the ESPHome Device Builder interface and choose the appropriate YAML code below depending upon your inverter setup.
+Once ESPHome is running, create a new device using the ESPHome Device Builder interface and choose the appropriate YAML code below depending upon your inverter setup.
 
 - [Single 1 Phase Inverter](/ESPHome-1P-Sunsynk-Deye.yaml)
 - [Primary/Secondary 1 Phase Inverters](ESPHome-1P-Sunsynk-Deye-Master-Slave.yaml)
 - [Single 3 Phase Inverter](ESPHome-3P-Sunsynk-Deye.yaml) - ! Not Tested !
 
-Spend time reading through the configuration file and disable any metrics which aren't required as this will minimize Home Assistant database growth.
+Read through the configuration file and disable any metrics which aren't required as this will minimize Home Assistant database growth.
