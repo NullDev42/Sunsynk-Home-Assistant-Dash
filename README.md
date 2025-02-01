@@ -44,7 +44,8 @@ Alternatively, ESPHome can be installed as an add-on within Home Assistant by fo
 Once ESPHome is running, create a new device using the ESPHome Device Builder interface and choose the appropriate YAML code below depending upon your inverter setup.
 
 - [Single 1 Phase Inverter](/ESPHome-1P-Sunsynk-Deye.yaml)
-- [Primary/Secondary 1 Phase Inverters](ESPHome-1P-Sunsynk-Deye-Master-Slave.yaml)
-- [Single 3 Phase Inverter](ESPHome-3P-Sunsynk-Deye.yaml) - ! Not Tested !
+- [Primary/Secondary 1 Phase Inverters](/ESPHome-1P-Sunsynk-Deye-Master-Slave.yaml)
+- [Single 1 Phase 12k Inverter](/DEY12k-modbus.yml) - ! Not Tested !
+- [Single 3 Phase Inverter](/ESPHome-3P-Sunsynk-Deye.yaml) - ! Not Tested !
 
 Read through the configuration file and disable any metrics which aren't required as this will minimize Home Assistant database growth.
