@@ -1,0 +1,125 @@
+substitutions:
+  settings_skipped_updates: "30"
+  devicename: solark
+
+esphome:
+  name: $devicename
+  friendly_name: "SolArk 15k"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+api:
+  encryption:
+    key: !secret lilygo_encryption_key
+
+logger:
+  baud_rate: 0  # frees the 3rd UART and avoids some bugs like "WK2168 with canbus" or "BLE client with RS485 modbus"
+  logs:
+    # by default, every reading will be printed to the UART, which is very slow
+    # This will disable printing the readings but keep other helpful messages
+    sensor: INFO
+    component: ERROR
+
+preferences:
+  flash_write_interval: "48h"
+
+# Set pins required for LilyGo T-CAN485 board
+output:
+  - platform: gpio
+    id: ENABLE_PIN # Enable the chip
+    pin:
+      number: GPIO19
+      inverted: true
+# ! disabled because we are using this pin for flow control below !
+#  - platform: gpio
+#    id: SE_PIN # Enable autodirection
+#    pin:
+#      number: GPIO17
+#      inverted: true
+  - platform: gpio
+    id: ENABLE_5V_PIN # Enable 5V pin for RS485 chip
+    pin:
+      number: GPIO16
+      inverted: true
+
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB # The correct ordering
+    pin: 4
+    num_leds: 1
+    rmt_symbols: 96
+    chipset: ws2812
+    name: "Light"
+
+uart:
+  id: mod_bus
+  tx_pin: GPIO22
+  rx_pin: GPIO21
+  baud_rate: 9600
+  stop_bits: 1
+
+modbus:
+  id: inverter_modbus
+  flow_control_pin: GPIO17
+
+modbus_controller:
+  - id: inverter1
+    address: 0x01
+    modbus_id: inverter_modbus
+    setup_priority: -10
+    update_interval: "15s"
+    command_throttle: "50ms"
+  - id: inverter2
+    address: 0x02
+    modbus_id: inverter_modbus
+    setup_priority: -10
+    update_interval: "15s"
+    command_throttle: "50ms"
+
+#Set the interval to sync your inverter time with HA or comment out to disable 
+interval:
+  - interval: 3600s
+    then:
+      - lambda: |-
+          esphome::modbus_controller::ModbusController *controller = id(inverter1);
+          time_t now = ::time(nullptr);
+          struct tm *time_info = ::localtime(&now);
+          int seconds = time_info->tm_sec;
+          int minutes = time_info->tm_min;
+          int hour = time_info->tm_hour;
+          int day = time_info->tm_mday;
+          int month = time_info->tm_mon + 1;
+          int year = time_info->tm_year;
+          year = year + 1900;
+          int year1 = year - 2000;
+          
+          uint16_t reg22_value = (year1 << 8) | month;
+          uint16_t reg23_value = (day << 8) | hour;
+          uint16_t reg24_value = (minutes << 8) | seconds;
+          
+          if (year != 1970) {
+            std::vector<uint16_t> rtc_data = {reg22_value, reg23_value, reg24_value};
+            esphome::modbus_controller::ModbusCommandItem set_rtc_command =
+                esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller, 22, rtc_data.size(), rtc_data);
+            controller->queue_command(set_rtc_command);
+            ESP_LOGI("Time Sync", "Seconds: %d, Minutes: %d, Hour: %d, Day: %d, Month: %d, Year: %d", seconds, minutes, hour, day, month, year);
+          }
+
+# Include packages for each inverter
+packages:
+  home: !include common-all.yaml
+  pack_1: !include
+    file: common-solark.yaml
+    vars:
+      modbus_controller_id: inverter1
+      id_name: "inverter"
+      desc_name: ""
+  pack_2: !include
+    file: common-solark.yaml
+    vars:
+      modbus_controller_id: inverter2
+      id_name: "slave_inverter"
+      desc_name: "Slave "
