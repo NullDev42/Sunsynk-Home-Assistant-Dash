@@ -1,0 +1,87 @@
+wifi:
+  # Set minimum WiFi security - reject connections to networks with weaker security
+  # Default is WPA2 on ESP32, WPA on ESP8266 (will change to WPA2 in 2026.6.0)
+  min_auth_mode: WPA2  # Or WPA3 for ESP32 if all your networks support it
+  networks:
+  - ssid: !secret wifi_ssid2
+    password: !secret wifi_password2
+  - ssid: !secret wifi_ssid
+    password: !secret wifi_password
+  reboot_timeout: 15min
+  power_save_mode: none
+  fast_connect: true
+
+sun:
+  id: sun_sun
+  latitude: !secret home_latitude
+  longitude: !secret home_longitude
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+    
+time:
+  - platform: homeassistant
+    id: ha_time
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP"
+      id: device_ip
+      icon: "mdi:ip-outline"
+      entity_category: diagnostic
+    dns_address:
+      name: "DNS"
+      id: device_dns
+      icon: "mdi:dns-outline"
+      entity_category: diagnostic
+    ssid:
+      name: "SSID"
+      icon: "mdi:wifi-settings"
+      entity_category: diagnostic
+    bssid:
+      name: "BSSID"
+      icon: "mdi:wifi-settings"
+      entity_category: diagnostic
+    mac_address:
+      name: "MAC"
+      icon: "mdi:network-outline"
+    scan_results:
+      name: "Wifi Scan"
+      icon: "mdi:wifi-refresh"
+      entity_category: diagnostic
+      disabled_by_default: true
+  - platform: version
+    name: "ESPHome Version"
+    entity_category: diagnostic
+
+binary_sensor:
+  - platform: status
+    name: "Connection Status"
+    id: connection_status
+    entity_category: diagnostic
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_signal_db
+    update_interval: 60s
+    entity_category: diagnostic
+#  - platform: copy
+#    source_id: wifi_signal_db
+#    name: "WiFi Signal Percent"
+#    filters:
+#    - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+#    unit_of_measurement: "%"
+#    entity_category: diagnostic
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+    entity_category: diagnostic
+
+button:
+  - platform: restart
+    name: "ESP Restart"
+    icon: mdi:power-cycle
+    entity_category: diagnostic
