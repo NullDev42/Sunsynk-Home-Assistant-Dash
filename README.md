@@ -48,4 +48,11 @@ Once ESPHome is running, create a new device using the ESPHome Device Builder in
 - [Single 1 Phase 12k Inverter](/DEY12k-modbus.yml) - ! Not Tested !
 - [Single 3 Phase Inverter](/ESPHome-3P-Sunsynk-Deye.yaml) - ! Not Tested !
 
+# ! UPDATE !
+
+I added 3 new files to clean up the yaml duplication:
+- common-all.yaml : This is the top level file for all ESPHome devices which defines global values
+- common-solark.yaml : This file breaks down all the values for a single Sol-Ark device
+- solark.yaml : This file pulls in "common-all.yaml" as well as a copy of "common-solark.yaml" for each Sol-Ark inverter.  The sample shows how to handle 2 inverters.
+
 Read through the configuration file and disable any metrics which aren't required as this will minimize Home Assistant database growth.
